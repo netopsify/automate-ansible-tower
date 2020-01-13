@@ -1,0 +1,103 @@
+---
+- name: Create tower organization
+  tower_organization:
+    name: "Foo"
+    description: "Foo bar organization"
+    state: present
+    tower_config_file: "~/tower_cli.cfg"
+- name: Create tower team
+  tower_team:
+    name: Team Name
+    description: Team Description
+    organization: test-org
+    state: present
+    tower_config_file: "~/tower_cli.cfg"
+- name: Add tower user as a system administrator
+  tower_user:
+    username: jdoe
+    password: foobarbaz
+    email: jdoe@example.org
+    superuser: yes
+    state: present
+    tower_config_file: "~/tower_cli.cfg"
+- name: Create a valid SCM credential from a private_key file
+  tower_credential:
+    name: SCM Credential
+    organization: Default
+    state: present
+    kind: scm # ssh, vault, net, scm, aws, vmware, satellite6, cloudforms, gce, azure_rm, openstack, rhv, insights, tower
+    username: joe
+    password: secret
+    ssh_key_data: "{{ lookup('file', '/tmp/id_rsa') }}"
+    ssh_key_unlock: "passphrase"
+- tower_credential_type:
+    name: Nexus
+    description: Credentials type for Nexus
+    kind: cloud # ssh, vault, net, scm, cloud, insights
+    inputs: "{{ lookup('file', 'tower_credential_inputs_nexus.json') }}"
+    injectors: {'extra_vars': {'nexus_credential': 'test' }}
+    state: present
+    validate_certs: false
+- name: Add Tower Project with cache timeout and custom virtualenv
+  tower_project:
+    name: "Foo"
+    description: "Foo bar project"
+    organization: "test"
+    scm_update_on_launch: True
+    scm_update_cache_timeout: 60
+    custom_virtualenv: "/var/lib/awx/venv/ansible-2.2"
+    state: present
+    tower_config_file: "~/tower_cli.cfg"
+- name: Add tower inventory
+  tower_inventory:
+    name: "Foo Inventory"
+    description: "Our Foo Cloud Servers"
+    organization: "Bar Org"
+    state: present
+    tower_config_file: "~/tower_cli.cfg"
+- name: Add tower inventory source
+  tower_inventory_source:
+    name: Inventory source
+    description: My Inventory source
+    inventory: My inventory
+    credential: Devstack_credential
+    source: openstack # file, scm, ec2, gce, azure, azure_rm, vmware, satellite6, cloudforms, openstack, rhv, tower, custom
+    update_on_launch: true
+    update_on_project_update: true
+    overwrite: true
+    source_vars: '{ private: false }'
+    state: present
+    validate_certs: false
+- name: Add tower group
+  tower_group:
+    name: localhost
+    description: "Local Host Group"
+    inventory: "Local Inventory"
+    state: present
+    tower_config_file: "~/tower_cli.cfg"
+- name: Add tower host
+  tower_host:
+    name: localhost
+    description: "Local Host Group"
+    inventory: "Local Inventory"
+    state: present
+    tower_config_file: "~/tower_cli.cfg"
+    variables:
+      example_var: 123
+- name: Create tower Ping job template
+  tower_job_template:
+    name: "Ping"
+    job_type: "run"
+    inventory: "Local"
+    project: "Demo"
+    playbook: "ping.yml"
+    credential: "Local"
+    state: "present"
+    tower_config_file: "~/tower_cli.cfg"
+    survey_enabled: yes
+    survey_spec: "{{ lookup('file', 'my_survey.json') }}"
+- tower_workflow_template:
+    name: Workflow Template
+    description: My very first Workflow Template
+    organization: My optional Organization
+    schema: "{{ lookup('file', 'my_workflow.json') }}"

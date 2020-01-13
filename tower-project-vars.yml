@@ -1,0 +1,63 @@
+---
+tower:
+  host: # Tower Host information
+    url: "http://192.168.100.100"
+    port: 8052
+    username: admin
+    password: password
+  organization: Default # Tower Organziation name
+  credentials: # Credentials to be created.
+    ssh: # The keys here are important and should be either of these. (ssh, vault, net, scm, aws, vmware, satellite6, cloudforms, gce, azure_rm, openstack, rhv, insights, tower). These are acceptable args of ansible module.
+      username: admin
+      password: admin
+    scm:
+      username: admin
+      password: admin
+    vault:
+      vault_password: admin
+  project:
+    name: jira-automation
+    scm_branch: master
+    scm_url: "http://192.168.100.100:7990/scm/fautj/playbooks.git"
+  job_templates:
+  - name: TEST_Jira_Fetch
+    description: Template for running FETCH JIRA ISSUE
+    job_type: run
+    playbook: pb_fetch_jira_issue.yml
+    ask_extra_vars: yes
+    credential: creds-vault-Default-jira-automation
+  - name: TEST_slb_form
+    description: Template TEST_slb_form
+    job_type: run
+    playbook: pb_validate_slb_form.yml
+    ask_extra_vars: yes
+    # credential: 
+  - name: TEST_dev_Deploy
+    description: Template TEST_dev_Deploy
+    job_type: run
+    playbook: pb_dev_deploy_vip.yml
+    ask_extra_vars: yes
+    # credential: 
+  inventory:
+    description: Inventory for F5 Automation
+    groups: # Inventory Groups to be created.
+    - name: ltm
+    - name: gtm
+    - name: prod
+    - name: dev
+    - name: lab
+      parent: # Parent groups for the inventory group. i.e. lab will be added to ltm and gtm groups.
+      - ltm
+      - gtm
+    hosts:
+      - name: bigip01.lab.local
+        groups: # Groups that this host will belong to.
+        - lab
+        variables_file: bigip01.lab.local.yml # optionally define host vars associated with this host.
+      - name: bigip02.lab.local
+        groups:
+        - lab
+        variables_file: bigip02.lab.local.yml
+      - name: bigip03.lab.local
+        groups:
+        - lab

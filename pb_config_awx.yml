@@ -1,0 +1,149 @@
+# Requires ansible-tower-cli >= 3.0.2 on the system running this playbook.
+# Run as ansible-playbook pb_config_awx.yml -i "localhost" -c "local"
+---
+- name: Setting Up Tower for Network Pipeline
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+  - name: Include Vars
+    include_vars:
+      file: tower-project-vars.yml
+
+  - name: Create Credentials
+    tower_credential:
+      name: creds-{{ item.key }}-{{ tower.organization }}-{{ tower.project.name }}
+      organization: "{{ tower.organization }}"
+      state: present
+      kind: "{{ item.key }}" # ssh(machine), vault, net, scm, aws, vmware, satellite6, cloudforms, gce, azure_rm, openstack, rhv, insights, tower
+      username: "{{ item.value.username | default(omit) }}"
+      password: "{{ item.value.password | default(omit) }}"
+      tower_host: "{{ tower.host.url }}:{{ tower.host.port }}"
+      tower_username: "{{ tower.host.username }}"
+      tower_password: "{{ tower.host.password }}"
+      validate_certs: false
+    loop: "{{ tower.credentials | dict2items }}"
+    delegate_to: localhost
+    when: item.key != "vault"
+
+  - name: Create VAULT Credentials
+    command: "tower-cli credential create --name=creds-{{ item.key }}-{{ tower.organization }}-{{ tower.project.name }} --organization={{ tower.organization }} --inputs='vault_password: {{ item.value.vault_password }}' --credential-type=Vault --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }}"
+    loop: "{{ tower.credentials | dict2items }}"
+    when: item.key == "vault"
+
+  - name: Add project to tower
+    tower_project:
+      name: "{{ tower.project.name }}"
+      organization: "{{ tower.organization }}"
+      scm_url: "{{ tower.project.scm_url }}"
+      scm_branch: "{{ tower.project.scm_branch }}"
+      scm_credential: "creds-scm-{{ tower.organization }}-{{ tower.project.name }}"
+      scm_clean: yes
+      scm_delete_on_update: yes
+      scm_type: git # manual, git, hg, svn
+      scm_update_cache_timeout: 0
+      scm_update_on_launch: yes
+      tower_host: "{{ tower.host.url }}:{{ tower.host.port }}"
+      tower_username: "{{ tower.host.username }}"
+      tower_password: "{{ tower.host.password }}"
+      validate_certs: false
+    run_once: true
+    delegate_to: localhost
+
+  # - name: sleep for 60 seconds and continue with play
+  #   wait_for:
+  #     timeout: 60
+  #   delegate_to: localhost
+
+  - name: Add tower inventory
+    tower_inventory:
+      name: inventory-{{ tower.organization }}-{{ tower.project.name }}
+      description: "{{ tower.inventory.description }}"
+      organization: "{{ tower.organization }}"
+      state: present
+      tower_host: "{{ tower.host.url }}:{{ tower.host.port }}"
+      tower_username: "{{ tower.host.username }}"
+      tower_password: "{{ tower.host.password }}"
+      validate_certs: false
+    run_once: true
+    delegate_to: localhost
+
+  - name: Create Inventory Groups
+    command: "tower-cli group create --name={{ item.name }} --inventory=inventory-{{ tower.organization }}-{{ tower.project.name }} --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }}"
+    loop: "{{ tower.inventory.groups }}"
+
+  - name: Create Inventory Hosts
+    command: "tower-cli host create --name={{ item.name }} --inventory=inventory-{{ tower.organization }}-{{ tower.project.name }} --variables='@{{ item.variables_file }}' --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }}"
+    loop: "{{ tower.inventory.hosts }}"
+    when: item.variables_file is defined
+
+  - name: Create Inventory Hosts
+    command: "tower-cli host create --name={{ item.name }} --inventory=inventory-{{ tower.organization }}-{{ tower.project.name }}  --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }}"
+    loop: "{{ tower.inventory.hosts }}"
+    when: item.variables_file is not defined
+
+  - name: Get ID of the newly created Inventory
+    command: "tower-cli inventory list --name=inventory-{{ tower.organization }}-{{ tower.project.name }} --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }} -f id"
+    register: inventory_id_output
+  
+  - debug: var=inventory_id_output['stdout']
+    when: debug is defined
+  
+  - set_fact:
+      inventory_id_output: inventory_id_output['stdout']
+
+  - name: Get IDs for the currently created hosts
+    command: "tower-cli host list --name={{ item.name }} --inventory=inventory-{{ tower.organization }}-{{ tower.project.name }} --variables='@{{ item.name }}.yml' --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }} -f json"
+    loop: "{{ tower.inventory.hosts }}"
+    register: hosts_ids
+
+  - name: Get IDs for the currently created groups
+    command: "tower-cli group list --name={{ item.name }} --inventory=inventory-{{ tower.organization }}-{{ tower.project.name }} --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }} -f json"
+    loop: "{{ tower.inventory.groups }}"
+    register: groups_ids
+
+  - debug: var=hosts_ids
+    when: debug is defined
+
+  - set_fact:
+      hosts_ids_results: "{{ hosts_ids | id_extractor }}"
+      groups_ids_results: "{{ groups_ids | id_extractor }}"
+
+  - debug: var=group_ids_results
+    when: debug is defined
+
+  - copy:
+      content: "{{ hosts_ids_results | to_nice_json(indent=2) }}"
+      dest: hosts_ids.json
+    when: debug is defined
+
+  - copy:
+      content: "{{ groups_ids_results | to_nice_json(indent=2) }}"
+      dest: groups_ids.json
+    when: debug is defined
+
+  - name: Associate Inventory Hosts to Groups
+    command: "tower-cli host associate --host={{ hosts_ids_results[item.0.name] }} --group={{ groups_ids_results[item.1] }} --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }}"
+    loop: "{{ tower.inventory.hosts|subelements('groups') }}"
+
+  - name: Associate Inventory groups to parent Groups
+    command: "tower-cli group associate --group={{ groups_ids_results[item.0.name]}} --parent={{ groups_ids_results[item.1] }} --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }}"
+    loop: "{{lookup('subelements', tower.inventory.groups, 'parent', {'skip_missing': True})}}"
+
+  - name: Create job template
+    tower_job_template:
+      name: "{{ item.name }}"
+      description: "{{ item.description }}"
+      project: "{{ tower.project.name }}"
+      job_type: "{{ item.job_type }}"
+      playbook: "{{ item.playbook }}"
+      inventory: inventory-{{ tower.organization }}-{{ tower.project.name }}
+      ask_extra_vars: "{{ item.ask_extra_vars }}"
+      credential: "{{ item.credential | default(omit) }}"
+      vault_credential: "{{ item.vault_credential | default(omit) }}"
+      tower_host: "{{ tower.host.url }}:{{ tower.host.port }}"
+      tower_username: "{{ tower.host.username }}"
+      tower_password: "{{ tower.host.password }}"
+      validate_certs: false
+    loop: "{{ tower.job_templates }}"
