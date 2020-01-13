@@ -10,6 +10,13 @@
   - name: Include Vars
     include_vars:
       file: tower-project-vars.yml
+    tags:
+    - credentials
+    - project
+    - inventory
+    - inventory_hosts
+    - inventory_groups
+    - job_templates
 
   - name: Create Credentials
     tower_credential:
@@ -26,11 +33,15 @@
     loop: "{{ tower.credentials | dict2items }}"
     delegate_to: localhost
     when: item.key != "vault"
+    tags:
+    - credentials
 
   - name: Create VAULT Credentials
     command: "tower-cli credential create --name=creds-{{ item.key }}-{{ tower.organization }}-{{ tower.project.name }} --organization={{ tower.organization }} --inputs='vault_password: {{ item.value.vault_password }}' --credential-type=Vault --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }}"
     loop: "{{ tower.credentials | dict2items }}"
     when: item.key == "vault"
+    tags:
+    - credentials
 
   - name: Add project to tower
     tower_project:
@@ -50,11 +61,15 @@
       validate_certs: false
     run_once: true
     delegate_to: localhost
+    tags:
+    - project
 
   - name: sleep for 60 seconds and continue with play
     wait_for:
       timeout: 60
     delegate_to: localhost
+    tags:
+    - project
 
   - name: Add tower inventory
     tower_inventory:
@@ -68,68 +83,115 @@
       validate_certs: false
     run_once: true
     delegate_to: localhost
+    tags:
+    - project
 
   - name: Create Inventory Groups
     command: "tower-cli group create --name={{ item.name }} --inventory=inventory-{{ tower.organization }}-{{ tower.project.name }} --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }}"
     loop: "{{ tower.inventory.groups }}"
+    tags:
+    - inventory
+    - inventory_groups
 
   - name: Create Inventory Hosts
     command: "tower-cli host create --name={{ item.name }} --inventory=inventory-{{ tower.organization }}-{{ tower.project.name }} --variables='@{{ item.variables_file }}' --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }}"
     loop: "{{ tower.inventory.hosts }}"
     when: item.variables_file is defined
+    tags:
+    - inventory
+    - inventory_hosts
 
   - name: Create Inventory Hosts
     command: "tower-cli host create --name={{ item.name }} --inventory=inventory-{{ tower.organization }}-{{ tower.project.name }}  --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }}"
     loop: "{{ tower.inventory.hosts }}"
     when: item.variables_file is not defined
+    tags:
+    - inventory
+    - inventory_hosts
 
   - name: Get ID of the newly created Inventory
     command: "tower-cli inventory list --name=inventory-{{ tower.organization }}-{{ tower.project.name }} --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }} -f id"
     register: inventory_id_output
-  
+    tags:
+    - inventory
+
   - debug: var=inventory_id_output['stdout']
     when: debug is defined
-  
+    tags:
+    - inventory
+
   - set_fact:
       inventory_id_output: inventory_id_output['stdout']
+    tags:
+    - inventory
 
   - name: Get IDs for the currently created hosts
     command: "tower-cli host list --name={{ item.name }} --inventory=inventory-{{ tower.organization }}-{{ tower.project.name }} --variables='@{{ item.name }}.yml' --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }} -f json"
     loop: "{{ tower.inventory.hosts }}"
     register: hosts_ids
+    tags:
+    - inventory
+    - inventory_hosts
 
   - name: Get IDs for the currently created groups
     command: "tower-cli group list --name={{ item.name }} --inventory=inventory-{{ tower.organization }}-{{ tower.project.name }} --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }} -f json"
     loop: "{{ tower.inventory.groups }}"
     register: groups_ids
+    tags:
+    - inventory
+    - inventory_groups
 
   - debug: var=hosts_ids
     when: debug is defined
+    tags:
+    - inventory
+    - inventory_hosts
 
   - set_fact:
       hosts_ids_results: "{{ hosts_ids | id_extractor }}"
       groups_ids_results: "{{ groups_ids | id_extractor }}"
+    tags:
+    - inventory
+    - inventory_hosts
+    - inventory_groups
 
   - debug: var=group_ids_results
     when: debug is defined
+    tags:
+    - inventory
+    - inventory_groups
 
   - copy:
       content: "{{ hosts_ids_results | to_nice_json(indent=2) }}"
       dest: hosts_ids.json
     when: debug is defined
+    tags:
+    - inventory
+    - inventory_hosts
 
   - copy:
       content: "{{ groups_ids_results | to_nice_json(indent=2) }}"
       dest: groups_ids.json
     when: debug is defined
+    tags:
+    - inventory
+    - inventory_groups
 
   - name: Associate Inventory Hosts to Groups
     command: "tower-cli host associate --host={{ hosts_ids_results[item.0.name] }} --group={{ groups_ids_results[item.1] }} --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }}"
     loop: "{{ tower.inventory.hosts|subelements('groups') }}"
+    tags:
+    - inventory
+    - inventory_hosts
+    - inventory_groups
 
   - name: Associate Inventory groups to parent Groups
     command: "tower-cli group associate --group={{ groups_ids_results[item.0.name]}} --parent={{ groups_ids_results[item.1] }} --insecure -h {{ tower.host.url }}:{{ tower.host.port }} -u {{ tower.host.username }} -p {{ tower.host.password }}"
     loop: "{{lookup('subelements', tower.inventory.groups, 'parent', {'skip_missing': True})}}"
+    tags:
+    - inventory
+    - inventory_hosts
+    - inventory_groups
 
   - name: Create job template
     tower_job_template:
@@ -147,3 +209,5 @@
       tower_password: "{{ tower.host.password }}"
       validate_certs: false
     loop: "{{ tower.job_templates }}"
+    tags:
+    - job_templates
